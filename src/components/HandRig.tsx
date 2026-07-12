@@ -339,36 +339,96 @@ export default function HandRig({ entry }: HandRigProps) {
     };
   };
 
-  // Render a single hand SVG skeleton
+  // ── Volumetric rendering helpers ──
+
+  const capsulePath = (
+    p1: {x: number; y: number}, p2: {x: number; y: number},
+    r1: number, r2: number
+  ): string | null => {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) return null;
+    const nx = -dy / len, ny = dx / len;
+    return [
+      `M ${p1.x + nx * r1} ${p1.y + ny * r1}`,
+      `L ${p2.x + nx * r2} ${p2.y + ny * r2}`,
+      `A ${r2} ${r2} 0 0 1 ${p2.x - nx * r2} ${p2.y - ny * r2}`,
+      `L ${p1.x - nx * r1} ${p1.y - ny * r1}`,
+      `A ${r1} ${r1} 0 0 1 ${p1.x + nx * r1} ${p1.y + ny * r1}`,
+      'Z',
+    ].join(' ');
+  };
+
+  const nailEl = (
+    tip: {x: number; y: number}, prev: {x: number; y: number},
+    r: number, key: string
+  ) => {
+    const dx = tip.x - prev.x, dy = tip.y - prev.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) return null;
+    const cx = tip.x - (dx / len) * r * 0.25;
+    const cy = tip.y - (dy / len) * r * 0.25;
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    return (
+      <ellipse key={key} cx={cx} cy={cy}
+        rx={r * 0.72} ry={r * 0.52}
+        fill="#fce4d6" stroke="#dbb8a0" strokeWidth={0.6}
+        transform={`rotate(${angle} ${cx} ${cy})`}
+      />
+    );
+  };
+
+  const creaseEl = (
+    jt: {x: number; y: number}, prev: {x: number; y: number},
+    next: {x: number; y: number}, r: number, color: string, key: string
+  ) => {
+    const dx = next.x - prev.x, dy = next.y - prev.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 0.5) return null;
+    const nx = -dy / len, ny = dx / len;
+    const h = r * 0.65;
+    return (
+      <line key={key}
+        x1={jt.x + nx * h} y1={jt.y + ny * h}
+        x2={jt.x - nx * h} y2={jt.y - ny * h}
+        stroke={color} strokeWidth={0.8} strokeLinecap="round"
+      />
+    );
+  };
+
+  // Finger capsule radii: [mcp→pip, pip→dip, dip→tip] each [r_start, r_end]
+  const RADII: Record<string, number[][]> = {
+    thumb:  [[6.5, 5.5], [5.5, 4.8], [4.8, 4]],
+    index:  [[5.5, 4.7], [4.7, 3.8], [3.8, 3]],
+    middle: [[5.8, 5],   [5, 4],     [4, 3.2]],
+    ring:   [[5.2, 4.5], [4.5, 3.6], [3.6, 2.8]],
+    pinky:  [[4.5, 3.8], [3.8, 3],   [3, 2.4]],
+  };
+
+  // Render a single hand — volumetric illustration style
   const renderHandSkeleton = (layout: HandLayout, pose: HandPose, side: 'left' | 'right') => {
     const data = getHandPoints(0, 0, pose, side);
     const sideMultiplier = side === 'right' ? 1 : -1;
-
-    // Incorporate wrist rotation from real captured data into the total rotation
     const totalRotation = layout.r + pose.wristRotation;
     const rad = totalRotation * Math.PI / 180;
-
-    // Mirroring calculations based on palm orientation
     const orientMultiplier = pose.handOrientation === 'palm-in' ? -1 : 1;
     const effectiveSideMultiplier = sideMultiplier * orientMultiplier;
 
-    // Calculate global wrist connection points using effectiveSideMultiplier
     const ptLeftX = layout.x + (-22 * effectiveSideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
     const ptLeftY = layout.y + (-22 * effectiveSideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
     const ptRightX = layout.x + (22 * effectiveSideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
     const ptRightY = layout.y + (22 * effectiveSideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
 
-    // Determine screen edge based on horizontal layout placement
     const edgeX = layout.x < 200 ? 0 : 400;
     const edgeYTop = layout.y + 40;
     const edgeYBottom = layout.y + 110;
 
-    // Distinct styling for palm-in vs palm-out
     const isPalmIn = pose.handOrientation === 'palm-in';
-    const fillStyle = isPalmIn ? '#e5e2dd' : '#faf7f2'; // Knuckle/back of hand vs inner palm color
-    const strokeStyle = isPalmIn ? '#3a3a3b' : '#1e1e1f';
+    const skin   = isPalmIn ? '#e8c4a0' : '#f5d4b5';
+    const skinBg = isPalmIn ? '#ddb890' : '#edd0b0';
+    const outline = isPalmIn ? '#c09870' : '#d4a878';
+    const crease  = isPalmIn ? '#c8a078' : '#e0c0a0';
 
-    // Draw palm polygon
     const palmPoints = [
       `${-24 * effectiveSideMultiplier},${data.wrist.y}`,
       `${data.mcpBases.thumb.x},${data.mcpBases.thumb.y}`,
@@ -380,100 +440,99 @@ export default function HandRig({ entry }: HandRigProps) {
     ].join(' ');
 
     const fingers: ('thumb' | 'index' | 'middle' | 'ring' | 'pinky')[] = [
-      'thumb',
-      'index',
-      'middle',
-      'ring',
-      'pinky',
+      'thumb', 'index', 'middle', 'ring', 'pinky',
     ];
 
     return (
       <g>
-        {/* Forearm shape in global coordinates (rendered behind palm) */}
+        {/* Forearm */}
         <path
           d={`M ${ptLeftX} ${ptLeftY} L ${ptRightX} ${ptRightY} L ${edgeX} ${edgeYBottom} L ${edgeX} ${edgeYTop} Z`}
-          fill={fillStyle}
-          stroke={strokeStyle}
-          strokeWidth="2.5"
-          strokeLinejoin="round"
+          fill={skin} stroke={outline} strokeWidth="1.5" strokeLinejoin="round"
         />
 
-        {/* Rotated hand skeleton group */}
-        <g 
-          className="transition-all duration-300"
-          transform={`translate(${layout.x}, ${layout.y}) rotate(${totalRotation})`}
-        >
-          {/* Subtle background lock-in glow */}
-          <circle
-            cx={0}
-            cy={0}
-            r="100"
+        <g className="transition-all duration-300"
+           transform={`translate(${layout.x}, ${layout.y}) rotate(${totalRotation})`}>
+
+          {/* Glow pulse */}
+          <circle cx={0} cy={0} r="100"
             className={`fill-brand-500/10 blur-xl transition-all duration-300 ease-out pointer-events-none ${
               isGlow ? 'scale-110 opacity-100' : 'scale-90 opacity-0'
             }`}
           />
 
-          {/* Palm polygon */}
-          <polygon
-            points={palmPoints}
-            fill={fillStyle}
-            stroke={strokeStyle}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
+          {/* Palm */}
+          <polygon points={palmPoints}
+            fill={skin} stroke={outline} strokeWidth="1.5" strokeLinejoin="round"
           />
 
-          {/* Palm creases for palm-out */}
-          {!isPalmIn && (
-            <path
-              d="M -10 -10 Q 0 -5 10 -20 M -15 5 Q -2 12 15 -5"
-              fill="none"
-              stroke="#d0cdc5"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          )}
+          {/* Palm inner shadow for depth */}
+          <polygon points={palmPoints}
+            fill="url(#palmShadow)" stroke="none"
+          />
 
-          {/* Knuckle highlights for palm-in */}
-          {isPalmIn && (
-            <g stroke="#b5b2a9" strokeWidth="1.5" strokeLinecap="round">
-              <line x1={data.mcpBases.index.x} y1={data.mcpBases.index.y + 6} x2={data.mcpBases.index.x} y2={data.mcpBases.index.y + 12} />
-              <line x1={data.mcpBases.middle.x} y1={data.mcpBases.middle.y + 6} x2={data.mcpBases.middle.x} y2={data.mcpBases.middle.y + 12} />
-              <line x1={data.mcpBases.ring.x} y1={data.mcpBases.ring.y + 6} x2={data.mcpBases.ring.x} y2={data.mcpBases.ring.y + 12} />
-              <line x1={data.mcpBases.pinky.x} y1={data.mcpBases.pinky.y + 6} x2={data.mcpBases.pinky.x} y2={data.mcpBases.pinky.y + 12} />
+          {/* Palm creases (palm-out) */}
+          {!isPalmIn && (
+            <g fill="none" stroke={crease} strokeWidth="1" strokeLinecap="round" opacity={0.7}>
+              <path d="M -12 -8 Q 0 -3 12 -18" />
+              <path d="M -16 6 Q -2 14 16 -3" />
+              <path d="M -8 18 Q 2 22 10 12" />
             </g>
           )}
 
-          {/* Finger bone lines & joints */}
+          {/* Knuckle bumps (palm-in) */}
+          {isPalmIn && (
+            <g fill="none" stroke={crease} strokeWidth="1.2" strokeLinecap="round" opacity={0.6}>
+              {(['index', 'middle', 'ring', 'pinky'] as const).map((f) => {
+                const b = data.mcpBases[f];
+                return <circle key={f} cx={b.x} cy={b.y - 2} r={3.5} />;
+              })}
+            </g>
+          )}
+
+          {/* Finger capsules, creases, and nails */}
           {fingers.map((name) => {
             const pts = data[name];
-            const pathD = `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y} L ${pts[2].x} ${pts[2].y} L ${pts[3].x} ${pts[3].y}`;
+            const r = RADII[name];
+            const segments = [
+              { a: pts[0], b: pts[1], r: r[0] },
+              { a: pts[1], b: pts[2], r: r[1] },
+              { a: pts[2], b: pts[3], r: r[2] },
+            ];
+
+            const glowOutline = isGlow ? 'var(--color-brand-500)' : outline;
 
             return (
               <g key={name}>
-                {/* Bone segment paths */}
-                <path
-                  d={pathD}
-                  fill="none"
-                  stroke={isGlow ? 'var(--color-brand-500)' : strokeStyle}
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="transition-colors duration-150"
-                />
-                
-                {/* Joint nodes */}
-                {pts.map((pt, idx) => (
-                  <circle
-                    key={idx}
-                    cx={pt.x}
-                    cy={pt.y}
-                    r="3.5"
-                    fill="#ffffff"
-                    stroke={isGlow ? 'var(--color-brand-500)' : '#5d5a55'}
-                    strokeWidth="2"
-                    className="transition-colors duration-150"
-                  />
-                ))}
+                {/* Shadow layer (slightly offset, blurred) */}
+                {segments.map((s, i) => {
+                  const d = capsulePath(s.a, s.b, s.r[0], s.r[1]);
+                  return d ? (
+                    <path key={`sh-${i}`} d={d}
+                      fill={skinBg} stroke="none" opacity={0.5}
+                      transform="translate(0.5, 1)"
+                    />
+                  ) : null;
+                })}
+
+                {/* Main capsule segments */}
+                {segments.map((s, i) => {
+                  const d = capsulePath(s.a, s.b, s.r[0], s.r[1]);
+                  return d ? (
+                    <path key={`cap-${i}`} d={d}
+                      fill={skin} stroke={glowOutline}
+                      strokeWidth={1.2} strokeLinejoin="round"
+                      className="transition-colors duration-150"
+                    />
+                  ) : null;
+                })}
+
+                {/* Joint creases at PIP and DIP */}
+                {creaseEl(pts[1], pts[0], pts[2], r[1][0], crease, `cr-${name}-pip`)}
+                {creaseEl(pts[2], pts[1], pts[3], r[2][0], crease, `cr-${name}-dip`)}
+
+                {/* Fingernail at tip */}
+                {nailEl(pts[3], pts[2], r[2][1], `nail-${name}`)}
               </g>
             );
           })}
@@ -504,6 +563,12 @@ export default function HandRig({ entry }: HandRigProps) {
         viewBox="0 0 400 300"
         className="w-full max-w-sm h-auto select-none"
       >
+        <defs>
+          <radialGradient id="palmShadow" cx="50%" cy="40%" r="60%">
+            <stop offset="0%" stopColor="transparent" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0.06)" />
+          </radialGradient>
+        </defs>
         {isTwoHanded && currentSecondary && layoutConfig.secondary ? (
           <>
             {/* Secondary Hand (Left, shown on the right side) */}
