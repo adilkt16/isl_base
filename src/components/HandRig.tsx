@@ -240,22 +240,27 @@ export default function HandRig({ entry }: HandRigProps) {
     const sideMultiplier = side === 'right' ? 1 : -1;
     const bendSign = side === 'right' ? 1 : -1;
 
+    // Use handOrientation to dynamically mirror the left/right finger ordering
+    const orientMultiplier = pose.handOrientation === 'palm-in' ? -1 : 1;
+    const effectiveSideMultiplier = sideMultiplier * orientMultiplier;
+    const effectiveSide = effectiveSideMultiplier === 1 ? 'right' : 'left';
+
     // Base coordinate locations for finger knuckles (MCP) relative to hand center
     const mcpBases = {
-      thumb: { x: centerX - 35 * sideMultiplier, y: centerY + 25 },
-      index: { x: centerX - 20 * sideMultiplier, y: centerY - 25 },
-      middle: { x: centerX - 2 * sideMultiplier, y: centerY - 30 },
-      ring: { x: centerX + 16 * sideMultiplier, y: centerY - 25 },
-      pinky: { x: centerX + 32 * sideMultiplier, y: centerY - 15 },
+      thumb: { x: centerX - 35 * effectiveSideMultiplier, y: centerY + 25 },
+      index: { x: centerX - 20 * effectiveSideMultiplier, y: centerY - 25 },
+      middle: { x: centerX - 2 * effectiveSideMultiplier, y: centerY - 30 },
+      ring: { x: centerX + 16 * effectiveSideMultiplier, y: centerY - 25 },
+      pinky: { x: centerX + 32 * effectiveSideMultiplier, y: centerY - 15 },
     };
 
     // Ideal pointing angles (degrees) relative to hand vector
     const baseAngles = {
-      thumb: side === 'right' ? -145 : -35,
-      index: side === 'right' ? -98 : -82,
+      thumb: effectiveSide === 'right' ? -145 : -35,
+      index: effectiveSide === 'right' ? -98 : -82,
       middle: -90,
-      ring: side === 'right' ? -82 : -98,
-      pinky: side === 'right' ? -75 : -105,
+      ring: effectiveSide === 'right' ? -82 : -98,
+      pinky: effectiveSide === 'right' ? -75 : -105,
     };
 
     // Bone length scales
@@ -272,25 +277,52 @@ export default function HandRig({ entry }: HandRigProps) {
       const mcp = mcpBases[name];
       const d2r = Math.PI / 180;
 
-      const MAX_ABDUCTION = 35; // degrees -- real finger spread rarely exceeds this
+      const MAX_ABDUCTION = 35;
       const clampedAbduction = Math.max(-MAX_ABDUCTION, Math.min(MAX_ABDUCTION, fPose.abduction));
 
-      const a1 = (baseAngle + clampedAbduction * sideMultiplier + fPose.mcp * bendSign) * d2r;
+      // Calculate cumulative flexion (excluding abduction)
+      const totalFlexion = fPose.mcp + fPose.pip + fPose.dip;
+      const flexProgress = Math.min(1, (fPose.mcp + fPose.pip) / 180);
+
+      // Abduction only affects the base direction (lateral spread at the knuckle)
+      const mcpAbduction = clampedAbduction * effectiveSideMultiplier;
+      // Damping the abduction for distal joints as the finger curls to avoid tangled claws
+      const distalAbduction = mcpAbduction * (1 - flexProgress * 0.9);
+
+      // Apply foreshortening for curled joints to keep fist silhouettes compact and realistic
+      let lenScale0 = 1;
+      let lenScale1 = 1;
+      let lenScale2 = 1;
+
+      if (totalFlexion > 120) {
+        const scaleFactor = Math.min(0.65, (totalFlexion - 120) / 150);
+        lenScale0 = 1 - 0.35 * scaleFactor;
+        lenScale1 = 1 - 0.5 * scaleFactor;
+        lenScale2 = 1 - 0.65 * scaleFactor;
+      }
+
+      const l0 = fingerLengths[0] * lenScale0;
+      const l1 = fingerLengths[1] * lenScale1;
+      const l2 = fingerLengths[2] * lenScale2;
+
+      // a1 (MCP joint): uses base mcpAbduction
+      const a1 = (baseAngle + mcpAbduction + fPose.mcp * bendSign) * d2r;
       const pip = {
-        x: mcp.x + fingerLengths[0] * Math.cos(a1),
-        y: mcp.y + fingerLengths[0] * Math.sin(a1),
+        x: mcp.x + l0 * Math.cos(a1),
+        y: mcp.y + l0 * Math.sin(a1),
       };
 
-      const a2 = (baseAngle + clampedAbduction * sideMultiplier + (fPose.mcp + fPose.pip) * bendSign) * d2r;
+      // a2 (PIP joint) & a3 (DIP joint): abduction is not compounded, using distalAbduction
+      const a2 = (baseAngle + distalAbduction + (fPose.mcp + fPose.pip) * bendSign) * d2r;
       const dip = {
-        x: pip.x + fingerLengths[1] * Math.cos(a2),
-        y: pip.y + fingerLengths[1] * Math.sin(a2),
+        x: pip.x + l1 * Math.cos(a2),
+        y: pip.y + l1 * Math.sin(a2),
       };
 
-      const a3 = (baseAngle + clampedAbduction * sideMultiplier + (fPose.mcp + fPose.pip + fPose.dip) * bendSign) * d2r;
+      const a3 = (baseAngle + distalAbduction + (fPose.mcp + fPose.pip + fPose.dip) * bendSign) * d2r;
       const tip = {
-        x: dip.x + fingerLengths[2] * Math.cos(a3),
-        y: dip.y + fingerLengths[2] * Math.sin(a3),
+        x: dip.x + l2 * Math.cos(a3),
+        y: dip.y + l2 * Math.sin(a3),
       };
 
       return [mcp, pip, dip, tip];
@@ -312,15 +344,39 @@ export default function HandRig({ entry }: HandRigProps) {
     const data = getHandPoints(0, 0, pose, side);
     const sideMultiplier = side === 'right' ? 1 : -1;
 
+    // Incorporate wrist rotation from real captured data into the total rotation
+    const totalRotation = layout.r + pose.wristRotation;
+    const rad = totalRotation * Math.PI / 180;
+
+    // Mirroring calculations based on palm orientation
+    const orientMultiplier = pose.handOrientation === 'palm-in' ? -1 : 1;
+    const effectiveSideMultiplier = sideMultiplier * orientMultiplier;
+
+    // Calculate global wrist connection points using effectiveSideMultiplier
+    const ptLeftX = layout.x + (-22 * effectiveSideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
+    const ptLeftY = layout.y + (-22 * effectiveSideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
+    const ptRightX = layout.x + (22 * effectiveSideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
+    const ptRightY = layout.y + (22 * effectiveSideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
+
+    // Determine screen edge based on horizontal layout placement
+    const edgeX = layout.x < 200 ? 0 : 400;
+    const edgeYTop = layout.y + 40;
+    const edgeYBottom = layout.y + 110;
+
+    // Distinct styling for palm-in vs palm-out
+    const isPalmIn = pose.handOrientation === 'palm-in';
+    const fillStyle = isPalmIn ? '#e5e2dd' : '#faf7f2'; // Knuckle/back of hand vs inner palm color
+    const strokeStyle = isPalmIn ? '#3a3a3b' : '#1e1e1f';
+
     // Draw palm polygon
     const palmPoints = [
-      `${-24 * sideMultiplier},${data.wrist.y}`,
+      `${-24 * effectiveSideMultiplier},${data.wrist.y}`,
       `${data.mcpBases.thumb.x},${data.mcpBases.thumb.y}`,
       `${data.mcpBases.index.x},${data.mcpBases.index.y}`,
       `${data.mcpBases.middle.x},${data.mcpBases.middle.y}`,
       `${data.mcpBases.ring.x},${data.mcpBases.ring.y}`,
       `${data.mcpBases.pinky.x},${data.mcpBases.pinky.y}`,
-      `${24 * sideMultiplier},${data.wrist.y}`,
+      `${24 * effectiveSideMultiplier},${data.wrist.y}`,
     ].join(' ');
 
     const fingers: ('thumb' | 'index' | 'middle' | 'ring' | 'pinky')[] = [
@@ -331,27 +387,13 @@ export default function HandRig({ entry }: HandRigProps) {
       'pinky',
     ];
 
-    const rad = layout.r * Math.PI / 180;
-
-    // Calculate global wrist connection points
-    const ptLeftX = layout.x + (-22 * sideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
-    const ptLeftY = layout.y + (-22 * sideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
-    const ptRightX = layout.x + (22 * sideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
-    const ptRightY = layout.y + (22 * sideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
-
-    // Determine screen edge based on horizontal layout placement
-    // Left-side hands connect to left edge (x = 0), right-side hands connect to right edge (x = 400)
-    const edgeX = layout.x < 200 ? 0 : 400;
-    const edgeYTop = layout.y + 40;
-    const edgeYBottom = layout.y + 110;
-
     return (
       <g>
         {/* Forearm shape in global coordinates (rendered behind palm) */}
         <path
           d={`M ${ptLeftX} ${ptLeftY} L ${ptRightX} ${ptRightY} L ${edgeX} ${edgeYBottom} L ${edgeX} ${edgeYTop} Z`}
-          fill="#faf7f2"
-          stroke="#1e1e1f"
+          fill={fillStyle}
+          stroke={strokeStyle}
           strokeWidth="2.5"
           strokeLinejoin="round"
         />
@@ -359,7 +401,7 @@ export default function HandRig({ entry }: HandRigProps) {
         {/* Rotated hand skeleton group */}
         <g 
           className="transition-all duration-300"
-          transform={`translate(${layout.x}, ${layout.y}) rotate(${layout.r})`}
+          transform={`translate(${layout.x}, ${layout.y}) rotate(${totalRotation})`}
         >
           {/* Subtle background lock-in glow */}
           <circle
@@ -374,11 +416,32 @@ export default function HandRig({ entry }: HandRigProps) {
           {/* Palm polygon */}
           <polygon
             points={palmPoints}
-            fill="#faf7f2"
-            stroke="#1e1e1f"
+            fill={fillStyle}
+            stroke={strokeStyle}
             strokeWidth="2.5"
             strokeLinejoin="round"
           />
+
+          {/* Palm creases for palm-out */}
+          {!isPalmIn && (
+            <path
+              d="M -10 -10 Q 0 -5 10 -20 M -15 5 Q -2 12 15 -5"
+              fill="none"
+              stroke="#d0cdc5"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          )}
+
+          {/* Knuckle highlights for palm-in */}
+          {isPalmIn && (
+            <g stroke="#b5b2a9" strokeWidth="1.5" strokeLinecap="round">
+              <line x1={data.mcpBases.index.x} y1={data.mcpBases.index.y + 6} x2={data.mcpBases.index.x} y2={data.mcpBases.index.y + 12} />
+              <line x1={data.mcpBases.middle.x} y1={data.mcpBases.middle.y + 6} x2={data.mcpBases.middle.x} y2={data.mcpBases.middle.y + 12} />
+              <line x1={data.mcpBases.ring.x} y1={data.mcpBases.ring.y + 6} x2={data.mcpBases.ring.x} y2={data.mcpBases.ring.y + 12} />
+              <line x1={data.mcpBases.pinky.x} y1={data.mcpBases.pinky.y + 6} x2={data.mcpBases.pinky.x} y2={data.mcpBases.pinky.y + 12} />
+            </g>
+          )}
 
           {/* Finger bone lines & joints */}
           {fingers.map((name) => {
@@ -391,7 +454,7 @@ export default function HandRig({ entry }: HandRigProps) {
                 <path
                   d={pathD}
                   fill="none"
-                  stroke={isGlow ? 'var(--color-brand-500)' : '#1e1e1f'}
+                  stroke={isGlow ? 'var(--color-brand-500)' : strokeStyle}
                   strokeWidth="6"
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -419,6 +482,20 @@ export default function HandRig({ entry }: HandRigProps) {
     );
   };
 
+  // Generate dynamic disclaimer text based on confidence and sourceNote
+  const getDisclaimerText = () => {
+    const note = entry.sourceNote ? ` ${entry.sourceNote}` : '';
+    switch (entry.confidence) {
+      case 'data-derived':
+        return `Rendered from real captured hand-landmark data (median across samples).${note}`;
+      case 'convention':
+        return `Based on standard finger-counting convention, not verified against captured data.${note}`;
+      case 'placeholder-unconfirmed':
+      default:
+        return `Animating from rest to placeholder pose. Real joint angles require certified ISLRTC calibration data.${note}`;
+    }
+  };
+
   return (
     <div className="relative flex flex-col items-center justify-center rounded-xl border border-brand-100 bg-[#fbfaf7]/60 p-4 shadow-inner min-h-[300px]">
       
@@ -429,14 +506,14 @@ export default function HandRig({ entry }: HandRigProps) {
       >
         {isTwoHanded && currentSecondary && layoutConfig.secondary ? (
           <>
-            {/* Secondary Hand (Left, shown on the left) */}
+            {/* Secondary Hand (Left, shown on the right side) */}
             {renderHandSkeleton(layoutConfig.secondary, currentSecondary, 'left')}
             
-            {/* Primary Hand (Right, shown on the right) */}
+            {/* Primary Hand (Right, shown on the left side) */}
             {renderHandSkeleton(layoutConfig.primary, currentPrimary, 'right')}
           </>
         ) : (
-          /* Single Hand (Right, centered) */
+          /* Single Hand (Right, centered/left) */
           renderHandSkeleton(layoutConfig.primary, currentPrimary, 'right')
         )}
       </svg>
@@ -452,11 +529,13 @@ export default function HandRig({ entry }: HandRigProps) {
         </button>
       </div>
 
-      {/* Placeholder Disclaimer Info Bar */}
+      {/* Dynamic Disclaimer Info Bar */}
       <div className="absolute bottom-3 left-3 right-3 flex items-start gap-1.5 rounded bg-brand-50/50 p-2 text-left border border-brand-50 text-[10px] text-brand-700 leading-normal">
         <Info className="h-3.5 w-3.5 shrink-0 text-brand-500 mt-0.5" />
         <span>
-          <strong>Visual Rest Pose</strong>: Animating from rest to placeholder pose. Real joint angles require certified ISLRTC calibration data.
+          <strong>
+            {entry.confidence === 'data-derived' ? 'Data-Derived Sign' : entry.confidence === 'convention' ? 'Conventional Sign' : 'Visual Rest Pose'}
+          </strong>: {getDisclaimerText()}
         </span>
       </div>
     </div>
