@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: var(--font-serif), serif;
+  --font-sans: var(--font-sans), sans-serif;
+
+  --color-brand-50: #fefcfb;
+  --color-brand-100: #fcf4ee;
+  --color-brand-200: #f9e2d3;
+  --color-brand-300: #f3c7a9;
+  --color-brand-400: #ea9b6e;
+  --color-brand-500: #bf4f26; /* Main confident terracotta accent */
+  --color-brand-600: #a83d1c;
+  --color-brand-700: #8b3017;
+  --color-brand-800: #6e2714;
+  --color-brand-900: #592012;
+
+  --color-bg-warm: #fbfaf7;
+  --color-text-charcoal: #1e1e1f;
+  
+  --animate-draw: draw-path 1.2s ease-out forwards;
+}
+
+@keyframes draw-path {
+  from {
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Custom global styles to match the premium editorial feel */
+body {
+  background-color: #fbfaf7;
+  color: #1e1e1f;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Clear, aesthetic scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fcfbf9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #e2dfd7;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #d3cfc5;
+}
