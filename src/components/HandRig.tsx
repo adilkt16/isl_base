@@ -40,11 +40,154 @@ function interpolatePose(start: HandPose, end: HandPose, t: number): HandPose {
   };
 }
 
+interface HandLayout {
+  x: number;
+  y: number;
+  r: number;
+}
+
+const CUSTOM_LAYOUTS: Record<string, { primary: HandLayout; secondary?: HandLayout }> = {
+  // A: Closed fists side-by-side
+  'A': {
+    primary: { x: 140, y: 140, r: 25 },
+    secondary: { x: 260, y: 140, r: -25 },
+  },
+  // B: Loops touching
+  'B': {
+    primary: { x: 150, y: 140, r: 25 },
+    secondary: { x: 250, y: 140, r: -25 },
+  },
+  // C: One hand
+  'C': {
+    primary: { x: 180, y: 130, r: 20 },
+  },
+  // D: Left index vertical, right C loop touching it
+  'D': {
+    primary: { x: 165, y: 135, r: 35 },
+    secondary: { x: 240, y: 145, r: -15 },
+  },
+  // E: Right index tip touches left index tip
+  'E': {
+    primary: { x: 150, y: 165, r: 35 },
+    secondary: { x: 250, y: 165, r: -35 },
+  },
+  // F: Left horizontal, right vertical forming a cross
+  'F': {
+    primary: { x: 175, y: 140, r: 20 },
+    secondary: { x: 235, y: 150, r: -60 },
+  },
+  // G: Stacked vertically
+  'G': {
+    primary: { x: 185, y: 105, r: 30 },
+    secondary: { x: 215, y: 175, r: -30 },
+  },
+  // H: Left flat palm facing up (horizontal), right sweeping
+  'H': {
+    primary: { x: 175, y: 120, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+  // I: Index straight up
+  'I': {
+    primary: { x: 180, y: 130, r: 15 },
+  },
+  // J: Start at middle, draw J
+  'J': {
+    primary: { x: 175, y: 120, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+  // K: Left straight, right diagonal
+  'K': {
+    primary: { x: 170, y: 130, r: 35 },
+    secondary: { x: 235, y: 145, r: -20 },
+  },
+  // L: One hand L-shape
+  'L': {
+    primary: { x: 180, y: 130, r: 15 },
+  },
+  // M: Right 3 fingers flat on left palm
+  'M': {
+    primary: { x: 175, y: 110, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+  // N: Right 2 fingers flat on left palm
+  'N': {
+    primary: { x: 175, y: 110, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+  // O: Curved O-shape
+  'O': {
+    primary: { x: 180, y: 130, r: 20 },
+  },
+  // P: Left index/thumb stem, right loop
+  'P': {
+    primary: { x: 165, y: 135, r: 35 },
+    secondary: { x: 240, y: 145, r: -15 },
+  },
+  // Q: Left circle, right hook in circle from below
+  'Q': {
+    primary: { x: 180, y: 165, r: 65 },
+    secondary: { x: 240, y: 125, r: -15 },
+  },
+  // R: Right hook on left flat palm
+  'R': {
+    primary: { x: 175, y: 115, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+  // S: Pinkies extended and hooked
+  'S': {
+    primary: { x: 150, y: 140, r: 25 },
+    secondary: { x: 250, y: 140, r: -25 },
+  },
+  // T: Index extended and crossing/touching
+  'T': {
+    primary: { x: 160, y: 140, r: 20 },
+    secondary: { x: 240, y: 140, r: -20 },
+  },
+  // U: Curved fingers
+  'U': {
+    primary: { x: 180, y: 130, r: 15 },
+  },
+  // V: V-shape
+  'V': {
+    primary: { x: 180, y: 130, r: 15 },
+  },
+  // W: Interlocked fingers
+  'W': {
+    primary: { x: 160, y: 145, r: 35 },
+    secondary: { x: 240, y: 145, r: -35 },
+  },
+  // X: Index fingers crossed forming an X
+  'X': {
+    primary: { x: 170, y: 145, r: 45 },
+    secondary: { x: 230, y: 145, r: -45 },
+  },
+  // Y: Index fingers extended
+  'Y': {
+    primary: { x: 160, y: 140, r: 25 },
+    secondary: { x: 240, y: 140, r: -25 },
+  },
+  // Z: Draws Z on left palm
+  'Z': {
+    primary: { x: 175, y: 110, r: 20 },
+    secondary: { x: 245, y: 165, r: -50 },
+  },
+};
+
 export default function HandRig({ entry }: HandRigProps) {
   const [currentPrimary, setCurrentPrimary] = useState<HandPose>(HARDCODED_REST_POSE);
   const [currentSecondary, setCurrentSecondary] = useState<HandPose | undefined>(undefined);
   const [isGlow, setIsGlow] = useState(false);
   const [animTrigger, setAnimTrigger] = useState(0);
+
+  // Parse custom layout if defined, else fallback to defaults
+  const signKey = entry.signId.toUpperCase();
+  const isTwoHanded = entry.hands === 'two';
+  const layoutConfig = CUSTOM_LAYOUTS[signKey] || (isTwoHanded ? {
+    primary: { x: 140, y: 130, r: 35 },
+    secondary: { x: 260, y: 130, r: -35 },
+  } : {
+    primary: { x: 180, y: 130, r: 15 },
+  });
 
   // Play animation routine
   const triggerAnimation = useCallback(() => {
@@ -129,19 +272,22 @@ export default function HandRig({ entry }: HandRigProps) {
       const mcp = mcpBases[name];
       const d2r = Math.PI / 180;
 
-      const a1 = (baseAngle + fPose.abduction * sideMultiplier + fPose.mcp * bendSign) * d2r;
+      const MAX_ABDUCTION = 35; // degrees -- real finger spread rarely exceeds this
+      const clampedAbduction = Math.max(-MAX_ABDUCTION, Math.min(MAX_ABDUCTION, fPose.abduction));
+
+      const a1 = (baseAngle + clampedAbduction * sideMultiplier + fPose.mcp * bendSign) * d2r;
       const pip = {
         x: mcp.x + fingerLengths[0] * Math.cos(a1),
         y: mcp.y + fingerLengths[0] * Math.sin(a1),
       };
 
-      const a2 = (baseAngle + fPose.abduction * sideMultiplier + (fPose.mcp + fPose.pip) * bendSign) * d2r;
+      const a2 = (baseAngle + clampedAbduction * sideMultiplier + (fPose.mcp + fPose.pip) * bendSign) * d2r;
       const dip = {
         x: pip.x + fingerLengths[1] * Math.cos(a2),
         y: pip.y + fingerLengths[1] * Math.sin(a2),
       };
 
-      const a3 = (baseAngle + fPose.abduction * sideMultiplier + (fPose.mcp + fPose.pip + fPose.dip) * bendSign) * d2r;
+      const a3 = (baseAngle + clampedAbduction * sideMultiplier + (fPose.mcp + fPose.pip + fPose.dip) * bendSign) * d2r;
       const tip = {
         x: dip.x + fingerLengths[2] * Math.cos(a3),
         y: dip.y + fingerLengths[2] * Math.sin(a3),
@@ -162,19 +308,19 @@ export default function HandRig({ entry }: HandRigProps) {
   };
 
   // Render a single hand SVG skeleton
-  const renderHandSkeleton = (centerX: number, centerY: number, pose: HandPose, side: 'left' | 'right') => {
-    const data = getHandPoints(centerX, centerY, pose, side);
+  const renderHandSkeleton = (layout: HandLayout, pose: HandPose, side: 'left' | 'right') => {
+    const data = getHandPoints(0, 0, pose, side);
     const sideMultiplier = side === 'right' ? 1 : -1;
 
     // Draw palm polygon
     const palmPoints = [
-      `${centerX - 24 * sideMultiplier},${data.wrist.y}`,
+      `${-24 * sideMultiplier},${data.wrist.y}`,
       `${data.mcpBases.thumb.x},${data.mcpBases.thumb.y}`,
       `${data.mcpBases.index.x},${data.mcpBases.index.y}`,
       `${data.mcpBases.middle.x},${data.mcpBases.middle.y}`,
       `${data.mcpBases.ring.x},${data.mcpBases.ring.y}`,
       `${data.mcpBases.pinky.x},${data.mcpBases.pinky.y}`,
-      `${centerX + 24 * sideMultiplier},${data.wrist.y}`,
+      `${24 * sideMultiplier},${data.wrist.y}`,
     ].join(' ');
 
     const fingers: ('thumb' | 'index' | 'middle' | 'ring' | 'pinky')[] = [
@@ -185,79 +331,93 @@ export default function HandRig({ entry }: HandRigProps) {
       'pinky',
     ];
 
+    const rad = layout.r * Math.PI / 180;
+
+    // Calculate global wrist connection points
+    const ptLeftX = layout.x + (-22 * sideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
+    const ptLeftY = layout.y + (-22 * sideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
+    const ptRightX = layout.x + (22 * sideMultiplier * Math.cos(rad) - 80 * Math.sin(rad));
+    const ptRightY = layout.y + (22 * sideMultiplier * Math.sin(rad) + 80 * Math.cos(rad));
+
+    // Determine screen edge based on horizontal layout placement
+    // Left-side hands connect to left edge (x = 0), right-side hands connect to right edge (x = 400)
+    const edgeX = layout.x < 200 ? 0 : 400;
+    const edgeYTop = layout.y + 40;
+    const edgeYBottom = layout.y + 110;
+
     return (
-      <g className="transition-all duration-300">
-        
-        {/* Subtle background lock-in glow */}
-        <circle
-          cx={centerX}
-          cy={centerY}
-          r="100"
-          className={`fill-brand-500/10 blur-xl transition-all duration-300 ease-out pointer-events-none ${
-            isGlow ? 'scale-110 opacity-100' : 'scale-90 opacity-0'
-          }`}
-        />
-
-        {/* Wrist base shape */}
+      <g>
+        {/* Forearm shape in global coordinates (rendered behind palm) */}
         <path
-          d={`M ${centerX - 24 * sideMultiplier} ${data.wrist.y} 
-              L ${centerX + 24 * sideMultiplier} ${data.wrist.y} 
-              L ${centerX + 18 * sideMultiplier} ${data.wrist.y + 20} 
-              L ${centerX - 18 * sideMultiplier} ${data.wrist.y + 20} Z`}
-          fill="#f0ede8"
-          stroke="#5d5a55"
-          strokeWidth="2"
-          strokeLinejoin="round"
-        />
-
-        {/* Palm polygon */}
-        <polygon
-          points={palmPoints}
+          d={`M ${ptLeftX} ${ptLeftY} L ${ptRightX} ${ptRightY} L ${edgeX} ${edgeYBottom} L ${edgeX} ${edgeYTop} Z`}
           fill="#faf7f2"
           stroke="#1e1e1f"
           strokeWidth="2.5"
           strokeLinejoin="round"
         />
 
-        {/* Finger bone lines & joints */}
-        {fingers.map((name) => {
-          const pts = data[name];
-          const pathD = `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y} L ${pts[2].x} ${pts[2].y} L ${pts[3].x} ${pts[3].y}`;
+        {/* Rotated hand skeleton group */}
+        <g 
+          className="transition-all duration-300"
+          transform={`translate(${layout.x}, ${layout.y}) rotate(${layout.r})`}
+        >
+          {/* Subtle background lock-in glow */}
+          <circle
+            cx={0}
+            cy={0}
+            r="100"
+            className={`fill-brand-500/10 blur-xl transition-all duration-300 ease-out pointer-events-none ${
+              isGlow ? 'scale-110 opacity-100' : 'scale-90 opacity-0'
+            }`}
+          />
 
-          return (
-            <g key={name}>
-              {/* Bone segment paths */}
-              <path
-                d={pathD}
-                fill="none"
-                stroke={isGlow ? 'var(--color-brand-500)' : '#1e1e1f'}
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="transition-colors duration-150"
-              />
-              
-              {/* Joint nodes */}
-              {pts.map((pt, idx) => (
-                <circle
-                  key={idx}
-                  cx={pt.x}
-                  cy={pt.y}
-                  r="3.5"
-                  fill="#ffffff"
-                  stroke={isGlow ? 'var(--color-brand-500)' : '#5d5a55'}
-                  strokeWidth="2"
+          {/* Palm polygon */}
+          <polygon
+            points={palmPoints}
+            fill="#faf7f2"
+            stroke="#1e1e1f"
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+          />
+
+          {/* Finger bone lines & joints */}
+          {fingers.map((name) => {
+            const pts = data[name];
+            const pathD = `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y} L ${pts[2].x} ${pts[2].y} L ${pts[3].x} ${pts[3].y}`;
+
+            return (
+              <g key={name}>
+                {/* Bone segment paths */}
+                <path
+                  d={pathD}
+                  fill="none"
+                  stroke={isGlow ? 'var(--color-brand-500)' : '#1e1e1f'}
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   className="transition-colors duration-150"
                 />
-              ))}
-            </g>
-          );
-        })}
+                
+                {/* Joint nodes */}
+                {pts.map((pt, idx) => (
+                  <circle
+                    key={idx}
+                    cx={pt.x}
+                    cy={pt.y}
+                    r="3.5"
+                    fill="#ffffff"
+                    stroke={isGlow ? 'var(--color-brand-500)' : '#5d5a55'}
+                    strokeWidth="2"
+                    className="transition-colors duration-150"
+                  />
+                ))}
+              </g>
+            );
+          })}
+        </g>
       </g>
     );
   };
-
-  const isTwoHanded = entry.hands === 'two';
 
   return (
     <div className="relative flex flex-col items-center justify-center rounded-xl border border-brand-100 bg-[#fbfaf7]/60 p-4 shadow-inner min-h-[300px]">
@@ -267,17 +427,17 @@ export default function HandRig({ entry }: HandRigProps) {
         viewBox="0 0 400 300"
         className="w-full max-w-sm h-auto select-none"
       >
-        {isTwoHanded && currentSecondary ? (
+        {isTwoHanded && currentSecondary && layoutConfig.secondary ? (
           <>
             {/* Secondary Hand (Left, shown on the left) */}
-            {renderHandSkeleton(120, 140, currentSecondary, 'left')}
+            {renderHandSkeleton(layoutConfig.secondary, currentSecondary, 'left')}
             
             {/* Primary Hand (Right, shown on the right) */}
-            {renderHandSkeleton(280, 140, currentPrimary, 'right')}
+            {renderHandSkeleton(layoutConfig.primary, currentPrimary, 'right')}
           </>
         ) : (
           /* Single Hand (Right, centered) */
-          renderHandSkeleton(200, 140, currentPrimary, 'right')
+          renderHandSkeleton(layoutConfig.primary, currentPrimary, 'right')
         )}
       </svg>
 
